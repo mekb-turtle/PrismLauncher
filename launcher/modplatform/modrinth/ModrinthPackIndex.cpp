@@ -2,6 +2,7 @@
 /*
  *  Prism Launcher - Minecraft Launcher
  *  Copyright (c) 2022 flowln <flowlnlnln@gmail.com>
+ *  Copyright (c) 2023 Trial97 <alexandru.tripon97@gmail.com>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -17,6 +18,7 @@
  */
 
 #include "ModrinthPackIndex.h"
+#include "FileSystem.h"
 #include "ModrinthAPI.h"
 
 #include "Json.h"
@@ -25,7 +27,6 @@
 #include "modplatform/ModIndex.h"
 
 static ModrinthAPI api;
-static ModPlatform::ProviderCapabilities ProviderCaps;
 
 bool shouldDownloadOnSide(QString side)
 {
@@ -104,6 +105,8 @@ void Modrinth::loadExtraPackData(ModPlatform::IndexedPack& pack, QJsonObject& ob
         pack.extraData.donate.append(donate);
     }
 
+    pack.extraData.status = Json::ensureString(obj, "status");
+
     pack.extraData.body = Json::ensureString(obj, "body").remove("<br>");
 
     pack.extraDataLoaded = true;
@@ -112,16 +115,11 @@ void Modrinth::loadExtraPackData(ModPlatform::IndexedPack& pack, QJsonObject& ob
 void Modrinth::loadIndexedPackVersions(ModPlatform::IndexedPack& pack, QJsonArray& arr, const BaseInstance* inst)
 {
     QVector<ModPlatform::IndexedVersion> unsortedVersions;
-    auto profile = (dynamic_cast<const MinecraftInstance*>(inst))->getPackProfile();
-    QString mcVersion = profile->getComponentVersion("net.minecraft");
-    auto loaders = profile->getSupportedModLoaders();
-
     for (auto versionIter : arr) {
         auto obj = versionIter.toObject();
         auto file = loadIndexedPackVersion(obj);
 
-        if (file.fileId.isValid() &&
-            (!loaders.has_value() || !file.loaders || loaders.value() & file.loaders))  // Heuristic to check if the returned value is valid
+        if (file.fileId.isValid())  // Heuristic to check if the returned value is valid
             unsortedVersions.append(file);
     }
     auto orderSortPredicate = [](const ModPlatform::IndexedVersion& a, const ModPlatform::IndexedVersion& b) -> bool {
@@ -152,15 +150,15 @@ auto Modrinth::loadIndexedPackVersion(QJsonObject& obj, QString preferred_hash_t
     for (auto loader : loaders) {
         if (loader == "neoforge")
             file.loaders |= ModPlatform::NeoForge;
-        if (loader == "forge")
+        else if (loader == "forge")
             file.loaders |= ModPlatform::Forge;
-        if (loader == "cauldron")
+        else if (loader == "cauldron")
             file.loaders |= ModPlatform::Cauldron;
-        if (loader == "liteloader")
+        else if (loader == "liteloader")
             file.loaders |= ModPlatform::LiteLoader;
-        if (loader == "fabric")
+        else if (loader == "fabric")
             file.loaders |= ModPlatform::Fabric;
-        if (loader == "quilt")
+        else if (loader == "quilt")
             file.loaders |= ModPlatform::Quilt;
     }
     file.version = Json::requireString(obj, "name");
@@ -224,6 +222,7 @@ auto Modrinth::loadIndexedPackVersion(QJsonObject& obj, QString preferred_hash_t
     if (parent.contains("url")) {
         file.downloadUrl = Json::requireString(parent, "url");
         file.fileName = Json::requireString(parent, "filename");
+        file.fileName = FS::RemoveInvalidPathChars(file.fileName);
         file.is_preferred = Json::requireBoolean(parent, "primary") || (files.count() == 1);
         auto hash_list = Json::requireObject(parent, "hashes");
 
@@ -231,7 +230,7 @@ auto Modrinth::loadIndexedPackVersion(QJsonObject& obj, QString preferred_hash_t
             file.hash = Json::requireString(hash_list, preferred_hash_type);
             file.hash_type = preferred_hash_type;
         } else {
-            auto hash_types = ProviderCaps.hashType(ModPlatform::ResourceProvider::MODRINTH);
+            auto hash_types = ModPlatform::ProviderCapabilities::hashType(ModPlatform::ResourceProvider::MODRINTH);
             for (auto& hash_type : hash_types) {
                 if (hash_list.contains(hash_type)) {
                     file.hash = Json::requireString(hash_list, hash_type);
